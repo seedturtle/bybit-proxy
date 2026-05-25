@@ -12,21 +12,22 @@ app.use(express.json());
 const BYBIT_API_KEY = process.env.BYBIT_API_KEY || '';
 const BYBIT_API_SECRET = process.env.BYBIT_API_SECRET || '';
 
-console.log('=== Bybit Proxy Starting ===');
-console.log('BYBIT_API_KEY:', BYBIT_API_KEY ? 'SET' : 'NOT SET');
-console.log('BYBIT_API_SECRET:', BYBIT_API_SECRET ? 'SET' : 'NOT SET');
+console.log('=== Starting ===');
+console.log('KEY:', BYBIT_API_KEY ? 'set' : 'NOT SET');
+console.log('SECRET:', BYBIT_API_SECRET ? 'set' : 'NOT SET');
 
-function sign(timestamp, qs) {
-  const data = timestamp + BYBIT_API_KEY + '5000' + (qs || '');
-  return crypto.createHmac('sha256', BYBIT_API_SECRET).update(data).digest('hex');
+function sign(ts, path, body) {
+  const str = ts + BYBIT_API_KEY + '5000' + (body ? JSON.stringify(body) : path);
+  return crypto.createHmac('sha256', BYBIT_API_SECRET).update(str).digest('hex');
 }
 
-function doRequest(method, path, qs, body) {
-  return new Promise((resolve, reject) => {
+function api(method, urlPath, body) {
+  return new Promise((resolve) => {
     const ts = Date.now().toString();
-    const sig = sign(ts, qs);
-    
-    const urlPath = path + (qs ? '?' + qs : '');
+    const bodyStr = body ? JSON.stringify(body) : '';
+    const signStr = body ? bodyStr : urlPath;
+    const sig = sign(ts, urlPath, body);
+
     const opts = {
       hostname: 'api.bybit.com',
       path: urlPath,
@@ -36,20 +37,17 @@ function doRequest(method, path, qs, body) {
         'X-BYBIT-TIMESTAMP': ts,
         'X-BYBIT-SIGN': sig,
         'X-BYBIT-RECV-WINDOW': '5000',
-        'Content-Type': 'application/json',
       }
     };
+    if (body) opts.headers['Content-Type'] = 'application/json';
 
     const req = https.request(opts, (res) => {
       let data = '';
       res.on('data', c => data += c);
-      res.on('end', () => {
-        try { resolve({ status: res.statusCode, body: JSON.parse(data) }); }
-        catch { resolve({ status: res.statusCode, body: data }); }
-      });
+      res.on('end', () => resolve({ status: res.statusCode, raw: data }));
     });
-    req.on('error', reject);
-    if (body) req.write(JSON.stringify(body));
+    req.on('error', (e) => resolve({ status: 0, raw: 'ERROR:' + e.message }));
+    if (body) req.write(bodyStr);
     req.end();
   });
 }
@@ -58,21 +56,36 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString(), ready: !!(BYBIT_API_KEY && BYBIT_API_SECRET) });
 });
 
+// Debug endpoint - raw test
+app.all('/test', async (req, res) => {
+  const method = req.query.method || 'GET';
+  const rp = req.query.path || '/v5/market/time';
+  const body = req.query.body ? JSON.parse(req.query.body) : null;
+  const result = await api(method, rp, body);
+  res.json(result);
+});
+
+// Bybit proxy
 app.all('/bybit/*', async (req, res) => {
   try {
-    if (!BYBIT_API_KEY || !BYBIT_API_SECRET) {
-      return res.status(500).json({ error: 'Bybit credentials not configured' });
-    }
-    const bp = req.path.replace(/^\/bybit/, '');
+    const bp = req.path.replace(/^\/bybit/, '') || '/';
     const qs = req.url.split('?')[1] || '';
+    const urlPath = bp + (qs ? '?' + qs : '');
     const body = ['POST','PUT','PATCH'].includes(req.method) ? req.body : null;
-    const result = await doRequest(req.method, bp, qs, body);
-    res.status(result.status).json(result.body);
+    
+    const result = await api(req.method, urlPath, body);
+    if (result.raw) {
+      try {
+        res.status(result.status).json(JSON.parse(result.raw));
+      } catch {
+        res.status(result.status).send(result.raw);
+      }
+    } else {
+      res.status(result.status || 502).json({ error: 'empty response' });
+    }
   } catch (err) {
     res.status(502).json({ error: err.message });
   }
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server listening on port ${PORT}`);
-});
+app.listen(PORT, '0.0.0.0', () => console.log(`Running on ${PORT}`));
