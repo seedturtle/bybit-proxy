@@ -89,3 +89,34 @@ app.all('/bybit/*', async (req, res) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => console.log(`Running on ${PORT}`));
+
+// Debug: show what signing would produce
+app.get('/debug-env', (req, res) => {
+  const ts = Date.now().toString();
+  const qs = req.query.qs || '';
+  const str = ts + BYBIT_API_KEY + '5000' + qs;
+  const sig = crypto.createHmac('sha256', BYBIT_API_SECRET).update(str).digest('hex');
+  res.json({
+    keyPrefix: BYBIT_API_KEY ? BYBIT_API_KEY.substring(0, 8) + '...' : 'EMPTY',
+    keyLength: BYBIT_API_KEY ? BYBIT_API_KEY.length : 0,
+    secretSet: !!BYBIT_API_SECRET,
+    timestamp: ts,
+    signString: str.substring(0, 20) + '...' + str.substring(str.length - 8),
+    signature: sig.substring(0, 20) + '...',
+  });
+});
+
+app.get('/debug-env', (req, res) => {
+  const ts = Date.now().toString();
+  const qs = req.query.qs || '';
+  const str = ts + BYBIT_API_KEY + '5000' + qs;
+  const sig = crypto.createHmac('sha256', BYBIT_API_SECRET).update(str).digest('hex');
+  res.json({
+    keyPrefix: BYBIT_API_KEY ? BYBIT_API_KEY.substring(0, 8) + '...' : 'EMPTY',
+    keyLength: BYBIT_API_KEY ? BYBIT_API_KEY.length : 0,
+    secretSet: !!BYBIT_API_SECRET,
+    timestamp: ts,
+    signStr: str.substring(0, 25) + '...',
+    signature: sig.substring(0, 20) + '...',
+  });
+});
