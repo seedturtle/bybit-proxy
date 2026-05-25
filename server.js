@@ -52,7 +52,16 @@ function callApi(method, urlPath, qs, body) {
 }
 
 app.get('/health', (req, res) => {
-  res.json({ ok: true, ready: !!(BYBIT_API_KEY && BYBIT_API_SECRET) });
+  const ts = Date.now().toString();
+  const samplePayload = ts + (BYBIT_API_KEY || '') + '5000' + '';
+  const sampleSig = BYBIT_API_SECRET ? crypto.createHmac('sha256', BYBIT_API_SECRET).update(samplePayload).digest('hex') : '';
+  res.json({
+    ok: true,
+    ready: !!(BYBIT_API_KEY && BYBIT_API_SECRET),
+    key_len: (BYBIT_API_KEY || '').length,
+    secret_len: (BYBIT_API_SECRET || '').length,
+    sample: { ts, payload_preview: ts + (BYBIT_API_KEY || '').substring(0,4)+'...'+'5000', sig: sampleSig.substring(0,8)+'...' }
+  });
 });
 
 app.all('/bybit/*', async (req, res) => {
