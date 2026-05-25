@@ -9,14 +9,15 @@ const PORT = process.env.PORT || 8080;
 app.use(cors());
 app.use(express.json());
 
-const BYBIT_API_KEY = process.env.BYBIT_API_KEY || '';
-const BYBIT_API_SECRET = process.env.BYBIT_API_SECRET || '';
+const BYBIT_API_KEY=process.env.BYBIT_API_KEY || '';
+const BYBIT_API_SECRET=process.env.BYBIT_API_SECRET || '';
 
 console.log('Starting...');
 console.log('KEY:', BYBIT_API_KEY ? 'SET' : 'NOT SET');
 
-function signReq(ts, body) {
-  const payload = body ? JSON.stringify(body) : '';
+function signReq(ts, qs, body) {
+  // v5: GET -> timestamp+apiKey+recv+queryString, POST -> timestamp+apiKey+recv+jsonBody
+  const payload = body ? JSON.stringify(body) : (qs || '');
   const str = ts + BYBIT_API_KEY + '5000' + payload;
   return crypto.createHmac('sha256', BYBIT_API_SECRET).update(str).digest('hex');
 }
@@ -24,7 +25,7 @@ function signReq(ts, body) {
 function callApi(method, urlPath, qs, body) {
   return new Promise((resolve) => {
     const ts = Date.now().toString();
-    const sig = signReq(ts, body);
+    const sig = signReq(ts, qs || '', body);
     const fullPath = urlPath + (qs ? '?' + qs : '');
 
     const opts = {
@@ -32,10 +33,10 @@ function callApi(method, urlPath, qs, body) {
       path: fullPath,
       method,
       headers: {
-        'X-BYBIT-API-KEY': BYBIT_API_KEY,
-        'X-BYBIT-TIMESTAMP': ts,
-        'X-BYBIT-SIGN': sig,
-        'X-BYBIT-RECV-WINDOW': '5000',
+        'X-BAPI-API-KEY': BYBIT_API_KEY,
+        'X-BAPI-TIMESTAMP': ts,
+        'X-BAPI-SIGN': sig,
+        'X-BAPI-RECV-WINDOW': '5000',
       }
     };
     if (body) opts.headers['Content-Type'] = 'application/json';
@@ -53,51 +54,6 @@ function callApi(method, urlPath, qs, body) {
 
 app.get('/health', (req, res) => {
   res.json({ ok: true, ready: !!(BYBIT_API_KEY && BYBIT_API_SECRET) });
-});
-
-app.get('/test-wallet', async (req, res) => {
-  try {
-    const ts = Date.now().toString();
-    const payload = '';
-    const str = ts + BYBIT_API_KEY + '5000' + payload;
-    const sig = crypto.createHmac('sha256', BYBIT_API_SECRET).update(str).digest('hex');
-
-    const opts = {
-      hostname: 'api.bybit.com',
-      path: '/v5/account/wallet-balance?accountType=UNIFIED&coin=USDT',
-      method: 'GET',
-      headers: {
-        'X-BYBIT-API-KEY': BYBIT_API_KEY,
-        'X-BYBIT-TIMESTAMP': ts,
-        'X-BYBIT-SIGN': sig,
-        'X-BYBIT-RECV-WINDOW': '5000',
-      }
-    };
-
-    const r = await new Promise((resolve) => {
-      const req = https.request(opts, (rsp) => {
-        let d = '';
-        rsp.on('data', c => d += c);
-        rsp.on('end', () => resolve({ s: rsp.statusCode, d }));
-      });
-      req.on('error', e => resolve({ s: 0, d: 'ERR:' + e.message }));
-      req.end();
-    });
-
-    res.json({
-      status: r.s,
-      body: r.d,
-      debug: {
-        ts_len: ts.length,
-        key_len: BYBIT_API_KEY.length,
-        secret_len: BYBIT_API_SECRET.length,
-        recv: '5000',
-        sig_prefix: sig.substring(0, 8)
-      }
-    });
-  } catch (e) {
-    res.json({ error: e.message });
-  }
 });
 
 app.all('/bybit/*', async (req, res) => {
