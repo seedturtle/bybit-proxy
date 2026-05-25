@@ -1,7 +1,7 @@
+const https = require('https');
 const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
-const https = require('https');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -9,82 +9,70 @@ const PORT = process.env.PORT || 8080;
 app.use(cors());
 app.use(express.json());
 
-// Read Bybit API credentials from environment
-const BYBIT_API_KEY = process.env.BYBIT_API_KEY;
-const BYBIT_API_SECRET = process.env.BYBIT_API_SECRET;
+const BYBIT_API_KEY = process.env.BYBIT_API_KEY || '';
+const BYBIT_API_SECRET = process.env.BYBIT_API_SECRET || '';
 
-function signRequest(timestamp, queryString) {
-  const signStr = timestamp + BYBIT_API_KEY + '5000' + queryString;
-  return crypto.createHmac('sha256', BYBIT_API_SECRET).update(signStr).digest('hex');
+console.log('=== Bybit Proxy Starting ===');
+console.log('BYBIT_API_KEY:', BYBIT_API_KEY ? 'SET' : 'NOT SET');
+console.log('BYBIT_API_SECRET:', BYBIT_API_SECRET ? 'SET' : 'NOT SET');
+
+function sign(timestamp, qs) {
+  const data = timestamp + BYBIT_API_KEY + '5000' + (qs || '');
+  return crypto.createHmac('sha256', BYBIT_API_SECRET).update(data).digest('hex');
 }
 
-function bybitRequest(method, path, queryString, body) {
+function doRequest(method, path, qs, body) {
   return new Promise((resolve, reject) => {
-    const timestamp = Date.now().toString();
-    const qs = queryString || '';
-    const signature = signRequest(timestamp, qs);
+    const ts = Date.now().toString();
+    const sig = sign(ts, qs);
     
     const urlPath = path + (qs ? '?' + qs : '');
-    const options = {
+    const opts = {
       hostname: 'api.bybit.com',
       path: urlPath,
-      method: method,
+      method,
       headers: {
         'X-BYBIT-API-KEY': BYBIT_API_KEY,
-        'X-BYBIT-TIMESTAMP': timestamp,
-        'X-BYBIT-SIGN': signature,
+        'X-BYBIT-TIMESTAMP': ts,
+        'X-BYBIT-SIGN': sig,
         'X-BYBIT-RECV-WINDOW': '5000',
         'Content-Type': 'application/json',
-        'Origin': 'https://www.bybit.com',
       }
     };
 
-    const req = https.request(options, (res) => {
+    const req = https.request(opts, (res) => {
       let data = '';
-      res.on('data', chunk => data += chunk);
+      res.on('data', c => data += c);
       res.on('end', () => {
-        try {
-          resolve({ status: res.statusCode, body: JSON.parse(data) });
-        } catch {
-          resolve({ status: res.statusCode, body: data });
-        }
+        try { resolve({ status: res.statusCode, body: JSON.parse(data) }); }
+        catch { resolve({ status: res.statusCode, body: data }); }
       });
     });
-
     req.on('error', reject);
-    
-    if (body) {
-      req.write(typeof body === 'string' ? body : JSON.stringify(body));
-    }
+    if (body) req.write(JSON.stringify(body));
     req.end();
   });
 }
 
-// Health check
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', time: new Date().toISOString() });
+  res.json({ status: 'ok', time: new Date().toISOString(), ready: !!(BYBIT_API_KEY && BYBIT_API_SECRET) });
 });
 
-// Bybit proxy - any method, any path under /bybit/
 app.all('/bybit/*', async (req, res) => {
   try {
-    const bybitPath = req.path.replace('/bybit', '');
-    const qs = req.url.split('?')[1] || '';
-    
-    let body = null;
-    if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
-      body = req.body;
+    if (!BYBIT_API_KEY || !BYBIT_API_SECRET) {
+      return res.status(500).json({ error: 'Bybit credentials not configured' });
     }
-    
-    const result = await bybitRequest(req.method, bybitPath, qs, body);
+    const bp = req.path.replace(/^\/bybit/, '');
+    const qs = req.url.split('?')[1] || '';
+    const body = ['POST','PUT','PATCH'].includes(req.method) ? req.body : null;
+    const result = await doRequest(req.method, bp, qs, body);
     res.status(result.status).json(result.body);
   } catch (err) {
-    console.error('Proxy error:', err.message);
-    res.status(502).json({ error: err.message, code: 'PROXY_ERROR' });
+    res.status(502).json({ error: err.message });
   }
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Bybit Proxy running on port ${PORT}`);
-  console.log(`API Key configured: ${BYBIT_API_KEY ? '✅' : '❌'}`);
+  console.log(`Server listening on port ${PORT}`);
 });
