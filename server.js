@@ -15,8 +15,8 @@ const BYBIT_API_SECRET=process.env.BYBIT_API_SECRET || '';
 console.log('Starting...');
 console.log('KEY:', BYBIT_API_KEY ? 'SET' : 'NOT SET');
 
-function signReq(ts, qs, body) {
-  const payload = body ? JSON.stringify(body) : (qs || '');
+function signReq(ts, body) {
+  const payload = body ? JSON.stringify(body) : '';
   const str = ts + BYBIT_API_KEY + '5000' + payload;
   return crypto.createHmac('sha256', BYBIT_API_SECRET).update(str).digest('hex');
 }
@@ -24,7 +24,7 @@ function signReq(ts, qs, body) {
 function callApi(method, urlPath, qs, body) {
   return new Promise((resolve) => {
     const ts = Date.now().toString();
-    const sig = signReq(ts, qs || '', body);
+    const sig = signReq(ts, body);
     const fullPath = urlPath + (qs ? '?' + qs : '');
 
     const opts = {
